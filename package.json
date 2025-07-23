@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "run": "tsx src/",
-    "claude-terminal": "tsx src/claude-terminal.ts"
+    "claude-terminal": "tsx src/claude-terminal.ts",
+    "generate-object": "tsx src/generate-object.ts"
   },
   "keywords": [],
   "author": "",
