@@ -1,17 +1,37 @@
 {
   "name": "vercel-ai-sdk-masterclass",
   "version": "1.0.0",
-  "description": "",
+  "description": "A comprehensive collection of AI agent examples using the Vercel AI SDK with multiple AI providers, terminal capabilities, and advanced AI functions.",
   "main": "index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "run": "tsx src/",
     "claude-terminal": "tsx src/claude-terminal.ts",
-    "generate-object": "tsx src/generate-object.ts"
+    "generate-object": "tsx src/generate-object.ts",
+    "search-queries": "tsx src/search-queries.ts"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "ai",
+    "vercel-ai-sdk",
+    "anthropic",
+    "claude",
+    "openai",
+    "gpt",
+    "ai-agents",
+    "typescript",
+    "terminal",
+    "search",
+    "tools"
+  ],
+  "author": "RNViththagan",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RNViththagan/vercel-ai-sdk-masterclass.git"
+  },
+  "homepage": "https://github.com/RNViththagan/vercel-ai-sdk-masterclass#readme",
+  "bugs": {
+    "url": "https://github.com/RNViththagan/vercel-ai-sdk-masterclass/issues"
+  },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.12",
     "@ai-sdk/google": "^1.1.16",

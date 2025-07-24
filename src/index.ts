@@ -3,7 +3,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { generateText, Output, tool } from "ai";
 import z from "zod";
 
-const BOT_NAME = process.env.Bot_NAME || "Bot";
+const BOT_NAME = process.env.BOT_NAME || "Bot";
 async function main() {
   console.log("Hello, world!");
 
