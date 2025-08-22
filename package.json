@@ -7,7 +7,9 @@
     "dev": "tsx src/index.ts",
     "claude-terminal": "tsx src/claude-terminal.ts",
     "generate-object": "tsx src/generate-object.ts",
-    "search-queries": "tsx src/search-queries.ts"
+    "search-queries": "tsx src/search-queries.ts",
+    "cache-demo": "tsx src/cache-demo.ts",
+    "vercel-ai-cache-demo": "tsx src/vercel-ai-cache-demo.ts"
   },
   "keywords": [
     "ai",
@@ -37,6 +39,7 @@
     "@ai-sdk/google": "^1.1.16",
     "@ai-sdk/openai": "^1.1.13",
     "@ai-sdk/perplexity": "^1.0.1",
+    "@anthropic-ai/sdk": "^0.30.1",
     "ai": "^4.1.45",
     "exa-js": "^1.4.10",
     "zod": "^3.24.2"
