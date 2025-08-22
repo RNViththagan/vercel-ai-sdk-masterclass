@@ -1,10 +1,11 @@
 import "dotenv/config";
-import { anthropic } from '@ai-sdk/anthropic';
-import { streamText, tool } from 'ai';
-import * as readline from 'readline';
-import { z } from 'zod';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { anthropic } from "@ai-sdk/anthropic";
+import { CoreMessage, CoreUserMessage, Message, streamText, tool } from "ai";
+import * as readline from "readline";
+import { z } from "zod";
+import { exec } from "child_process";
+import { promisify } from "util";
+import * as fs from "fs";
 
 const main = async () => {
   console.log("🤖 Claude with Terminal Access - Type 'exit' to quit\n");
@@ -16,13 +17,14 @@ const main = async () => {
     output: process.stdout,
   });
 
-  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  const clientMessages: Array<CoreMessage> = [];
 
   // Terminal execution tool
   const executeCommand = tool({
-    description: 'Execute terminal commands as if opening a terminal and running them directly. Use this for any command-line operations.',
+    description:
+      "Execute terminal commands as if opening a terminal and running them directly. Use this for any command-line operations.",
     parameters: z.object({
-      command: z.string().describe('The terminal command to execute'),
+      command: z.string().describe("The terminal command to execute"),
     }),
     execute: async ({ command }) => {
       try {
@@ -44,7 +46,7 @@ const main = async () => {
 
         return {
           success: true,
-          output: stdout || stderr || 'Command completed',
+          output: stdout || stderr || "Command completed",
           exitCode: 0,
         };
       } catch (error) {
@@ -69,52 +71,90 @@ const main = async () => {
 
   const askQuestion = (): Promise<string> => {
     return new Promise((resolve) => {
-      rl.question('You: ', (answer) => {
+      rl.question("You: ", (answer) => {
         resolve(answer);
       });
     });
   };
 
+  clientMessages.push({
+    role: "system",
+    content:
+      "You are a helpful assistant with terminal access. You can execute commands and provide output as if you were a terminal.",
+    providerOptions: {
+      anthropic: { cacheControl: { type: "ephemeral" } },
+    },
+  });
+
+  const errorMessage = fs.readFileSync("src/data/error-message.txt", "utf8");
+
+  // clientMessages.push({
+  //   role: "user",
+  //   content: [
+  //     {
+  //       type: "text",
+  //       text: "You are a JavaScript expert.",
+  //     },
+  //     {
+  //       type: "text",
+  //       text: `Error message: ${errorMessage}`,
+  //       providerOptions: {
+  //         anthropic: {
+  //           cacheControl: { type: "ephemeral" },
+  //         },
+  //       },
+  //     },
+  //     {
+  //       type: "text",
+  //       text: "Explain the error message.",
+  //     },
+  //   ],
+  // });
+
   try {
     while (true) {
       const userInput = await askQuestion();
-
-      if (userInput.toLowerCase() === 'exit') {
-        console.log('Goodbye! 👋');
+      const startTime = Date.now();
+      if (userInput.toLowerCase() === "exit") {
+        console.log("Goodbye! 👋");
         break;
       }
 
       // Add user message to conversation
-      messages.push({ role: 'user', content: userInput });
+      clientMessages.push({ role: "user", content: userInput });
+      //console.info("\n[clientMessages]", clientMessages);
 
-      console.log('\nClaude: ');
+      console.log("\nClaude: ");
 
       const result = await streamText({
-        model: anthropic('claude-3-5-sonnet-20241022'),
-        messages: messages,
+        model: anthropic("claude-4-sonnet-20250514"),
+        messages: clientMessages,
         tools: {
           executeCommand,
         },
         maxSteps: 5,
       });
 
-      let assistantResponse = '';
+      let assistantResponse = "";
       for await (const textPart of result.textStream) {
         process.stdout.write(textPart);
         assistantResponse += textPart;
       }
 
+      const tokenDetails = await result.providerMetadata;
       // Add assistant response to conversation history
-      messages.push({ role: 'assistant', content: assistantResponse });
-
-      console.log('\n'); // Add newlines for spacing
+      clientMessages.push({ role: "assistant", content: assistantResponse });
+      console.log("\n\nClaude cache token details: ", tokenDetails);
+      console.log("Claude token usages", result.usage);
+      console.log("Claude response time:", Date.now() - startTime, "ms");
+      console.log("\n"); // Add newlines for spacing
     }
   } catch (error) {
-    console.error('Error with Claude:', error);
-    console.log('Make sure to set ANTHROPIC_API_KEY in your .env file');
+    console.error("Error with Claude:", error);
+    console.log("Make sure to set ANTHROPIC_API_KEY in your .env file");
   } finally {
     rl.close();
   }
-}
+};
 
 main().catch(console.error);
