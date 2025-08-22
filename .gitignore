@@ -89,6 +89,9 @@ temp/
 logs
 *.log
 
+# Conversation logs
+conversation-logs/
+
 # Build outputs
 build/
 dist/

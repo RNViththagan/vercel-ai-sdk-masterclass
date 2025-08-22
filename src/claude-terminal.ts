@@ -9,7 +9,7 @@ import * as fs from "fs";
 
 const main = async () => {
   console.log("🤖 Claude with Terminal Access - Type 'exit' to quit\n");
-
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const execAsync = promisify(exec);
 
   const rl = readline.createInterface({
@@ -142,12 +142,27 @@ const main = async () => {
       }
 
       const tokenDetails = await result.providerMetadata;
+      const usage = await result.usage;
       // Add assistant response to conversation history
       clientMessages.push({ role: "assistant", content: assistantResponse });
-      console.log("\n\nClaude cache token details: ", tokenDetails);
-      console.log("Claude token usages", result.usage);
-      console.log("Claude response time:", Date.now() - startTime, "ms");
+
+      console.log("\n📊 Response Details:");
+      console.log("- Cache token details:", tokenDetails);
+      console.log("- Token usage:", usage);
+      console.log("- Response time:", Date.now() - startTime, "ms");
       console.log("\n"); // Add newlines for spacing
+      // Log conversation to file
+
+      const logDir = "conversation-logs";
+      const logFile = `${logDir}/conversation-${timestamp}.json`;
+
+      // Ensure logs directory exists
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+
+      // Write conversation history to file
+      fs.writeFileSync(logFile, JSON.stringify(clientMessages, null, 2));
     }
   } catch (error) {
     console.error("Error with Claude:", error);
