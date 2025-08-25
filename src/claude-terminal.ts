@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { anthropic } from "@ai-sdk/anthropic";
-import { CoreMessage, CoreUserMessage, Message, streamText, tool } from "ai";
+import { CoreMessage, streamText, tool } from "ai";
 import * as readline from "readline";
 import { z } from "zod";
 import { exec } from "child_process";
@@ -28,7 +28,7 @@ const main = async () => {
     }),
     execute: async ({ command }) => {
       try {
-        console.log(`\n$ ${command}`);
+        //console.log(`\n$ ${command}`);
 
         const { stdout, stderr } = await execAsync(command, {
           timeout: 60000, // 60 second timeout for longer operations
@@ -36,13 +36,13 @@ const main = async () => {
           cwd: process.cwd(), // Use current working directory
         });
 
-        // Display output immediately like a real terminal
-        if (stdout) {
-          console.log(stdout);
-        }
-        if (stderr) {
-          console.error(stderr);
-        }
+        // // Display output immediately like a real terminal
+        // if (stdout) {
+        //   console.log(stdout);
+        // }
+        // if (stderr) {
+        //   console.error(stderr);
+        // }
 
         return {
           success: true,
@@ -86,6 +86,36 @@ const main = async () => {
     },
   });
 
+  const knownIds = new Set<string>();
+  const appendFinalMessages = (
+    history: Array<CoreMessage>,
+    finalMessages: Array<CoreMessage>,
+    cache: boolean
+  ) => {
+    for (let i = 0; i < finalMessages.length; i++) {
+      const m = finalMessages[i];
+
+      if ((m.role === "assistant" || m.role === "tool") && (m as any).id) {
+        if (!knownIds.has((m as any).id)) {
+          knownIds.add((m as any).id);
+
+          // Only the last assistant message gets the cache breakpoint
+          if (
+            cache &&
+            i === finalMessages.length - 1 &&
+            m.role === "assistant"
+          ) {
+            m.providerOptions = {
+              anthropic: { cacheControl: { type: "ephemeral" } },
+            };
+          }
+
+          history.push(m as CoreMessage);
+        }
+      }
+    }
+  };
+
   const errorMessage = fs.readFileSync("src/data/error-message.txt", "utf8");
 
   // clientMessages.push({
@@ -111,9 +141,19 @@ const main = async () => {
   //   ],
   // });
 
+  let userInput;
+  const userMsgs = [
+    "list all txt files in the directory. if there are not txt files. create one with name x1",
+    "what are the txt file were there",
+    "remove x1.txt",
+  ];
   try {
     while (true) {
-      const userInput = await askQuestion();
+      console.dir(clientMessages, { depth: null });
+
+      userInput = userMsgs.shift();
+      if (!userInput) userInput = await askQuestion();
+
       const startTime = Date.now();
       if (userInput.toLowerCase() === "exit") {
         console.log("Goodbye! 👋");
@@ -126,29 +166,37 @@ const main = async () => {
 
       console.log("\nClaude: ");
 
-      const result = await streamText({
-        model: anthropic("claude-4-sonnet-20250514"),
-        messages: clientMessages,
-        tools: {
-          executeCommand,
-        },
-        maxSteps: 5,
-      });
+      const { textStream, usage, providerMetadata, response, steps, ...rest } =
+        await streamText({
+          model: anthropic("claude-4-sonnet-20250514"),
+          messages: clientMessages,
+          tools: {
+            executeCommand,
+          },
+          maxSteps: 5,
+        });
 
       let assistantResponse = "";
-      for await (const textPart of result.textStream) {
+      for await (const textPart of textStream) {
         process.stdout.write(textPart);
         assistantResponse += textPart;
       }
 
-      const tokenDetails = await result.providerMetadata;
-      const usage = await result.usage;
+      const { messages: finalMessages } = await response;
+      console.dir(finalMessages, { depth: null });
+      const step = await steps;
+
+      const tokenDetails = await providerMetadata;
+
       // Add assistant response to conversation history
-      clientMessages.push({ role: "assistant", content: assistantResponse });
+      //clientMessages.push({ role: "assistant", content: assistantResponse });
+      const cache = userMsgs.length === 0;
+
+      appendFinalMessages(clientMessages, finalMessages, cache);
 
       console.log("\n📊 Response Details:");
       console.log("- Cache token details:", tokenDetails);
-      console.log("- Token usage:", usage);
+      console.log("- Token usage:", await usage);
       console.log("- Response time:", Date.now() - startTime, "ms");
       console.log("\n"); // Add newlines for spacing
       // Log conversation to file
@@ -169,6 +217,15 @@ const main = async () => {
     console.log("Make sure to set ANTHROPIC_API_KEY in your .env file");
   } finally {
     rl.close();
+    // Clean up created files
+    try {
+      if (fs.existsSync("x1.txt")) {
+        fs.unlinkSync("x1.txt");
+        console.log("Cleaned up x1.txt file");
+      }
+    } catch (error) {
+      console.error("Error cleaning up files:", error);
+    }
   }
 };
 
