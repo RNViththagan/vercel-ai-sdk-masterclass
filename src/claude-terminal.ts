@@ -92,6 +92,26 @@ const main = async () => {
     finalMessages: Array<CoreMessage>,
     cache: boolean
   ) => {
+    // First, remove cache control from previous assistant messages (except system message)
+    if (cache) {
+      history.forEach((msg) => {
+        if (
+          msg.role === "assistant" &&
+          msg.providerOptions?.anthropic?.cacheControl
+        ) {
+          delete msg.providerOptions.anthropic.cacheControl;
+          // Clean up empty providerOptions
+          if (Object.keys(msg.providerOptions.anthropic).length === 0) {
+            delete msg.providerOptions.anthropic;
+          }
+          if (Object.keys(msg.providerOptions).length === 0) {
+            delete msg.providerOptions;
+          }
+        }
+      });
+    }
+
+    // Then add new messages
     for (let i = 0; i < finalMessages.length; i++) {
       const m = finalMessages[i];
 
