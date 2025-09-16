@@ -64,19 +64,30 @@ function listConversations() {
     .filter(
       (file) => file.startsWith("conversation-") && file.endsWith(".json")
     )
-    .sort((a, b) => b.localeCompare(a));
+    .map((file) => {
+      const filePath = path.join(LOGS_DIR, file);
+      const stats = fs.statSync(filePath);
+      return {
+        fileName: file,
+        lastModified: stats.mtime,
+      };
+    })
+    .sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime()) // Sort by last modified time
+    .map((fileInfo) => fileInfo.fileName);
 
   if (files.length === 0) {
     console.log("📭 No conversation logs found");
     return;
   }
 
-  console.log(`📚 Found ${files.length} conversation logs:`);
+  console.log(
+    `📚 Found ${files.length} conversation logs (sorted by last activity):`
+  );
   console.log("═".repeat(120));
   console.log(
     "ID".padEnd(3) +
       "│ " +
-      "Timestamp".padEnd(20) +
+      "Last Modified".padEnd(20) +
       "│ " +
       "Messages".padEnd(8) +
       "│ " +
@@ -88,27 +99,34 @@ function listConversations() {
 
   files.forEach((file, index) => {
     try {
-      const content = JSON.parse(
-        fs.readFileSync(path.join(LOGS_DIR, file), "utf8")
-      );
-      const stats = getConversationStats(content);
+      const filePath = path.join(LOGS_DIR, file);
+      const fileStats = fs.statSync(filePath);
+      const content = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      const convStats = getConversationStats(content);
       const lastUserMessage = [...content]
         .reverse()
         .find((msg) => msg.role === "user");
 
       const id = (index + 1).toString().padEnd(3);
-      const timestamp = formatTimestamp(
-        file.replace("conversation-", "").replace(".json", "")
-      ).padEnd(20);
-      const messageCount = stats.total.toString().padEnd(8);
-      const commandCount = stats.commands.toString().padEnd(8);
+      const lastModifiedStr = fileStats.mtime
+        .toLocaleString("en-US", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        })
+        .replace(",", "")
+        .padEnd(20);
+      const messageCount = convStats.total.toString().padEnd(8);
+      const commandCount = convStats.commands.toString().padEnd(8);
       const lastMsg = (lastUserMessage?.content || "No messages").substring(
         0,
         60
       );
 
       console.log(
-        `${id}│ ${timestamp}│ ${messageCount}│ ${commandCount}│ ${lastMsg}`
+        `${id}│ ${lastModifiedStr}│ ${messageCount}│ ${commandCount}│ ${lastMsg}`
       );
     } catch (error) {
       console.log(

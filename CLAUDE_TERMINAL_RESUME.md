@@ -8,7 +8,8 @@ This enhanced version of the Claude Terminal application includes the ability to
 
 - Automatically saves all conversations to `conversation-logs/` directory
 - Resume any of your last 10 conversations
-- View conversation metadata (timestamp, last message, message count)
+- **Smart sorting by last activity** - most recently active conversations appear first
+- View conversation metadata (last modified time, last message, message count)
 - Context preview showing recent messages when resuming
 
 ### 🛠️ Special Commands
@@ -33,16 +34,16 @@ npm run claude-terminal-resume
 
 ### Resume Flow
 
-1. When you start the application, you'll see a list of recent conversations:
+1. When you start the application, you'll see a list of recent conversations sorted by last activity:
 
 ```
-🕐 Previous Conversations:
+🕐 Previous Conversations (sorted by last activity):
 ────────────────────────────────────────────────────────────────────────────────
-ID | Timestamp           | Last Message                      | Messages
+ID | Last Modified       | Last Message                      | Messages
 ────────────────────────────────────────────────────────────────────────────────
- 1 | 2025-09-16 09:31:36 | check my swap memory              | 4
- 2 | 2025-09-15 05:45:26 | list all files in current dir    | 6
- 3 | 2025-09-13 14:34:44 | what's my current directory       | 8
+ 1 | 09/16 16:46         | thanks                              | 48
+ 2 | 09/16 15:55         | list all wifi networks              | 7
+ 3 | 09/16 15:55         | write the folwing script as a file  | 5
 ────────────────────────────────────────────────────────────────────────────────
 Enter conversation ID to resume (1-10), or press Enter for new conversation:
 ```

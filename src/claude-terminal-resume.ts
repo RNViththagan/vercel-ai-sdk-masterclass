@@ -14,6 +14,8 @@ interface ConversationMetadata {
   timestamp: string;
   lastMessage: string;
   messageCount: number;
+  fileName?: string;
+  lastModified?: Date;
 }
 
 const main = async () => {
@@ -42,15 +44,24 @@ const main = async () => {
       .filter(
         (file) => file.startsWith("conversation-") && file.endsWith(".json")
       )
-      .sort((a, b) => b.localeCompare(a)); // Sort by newest first
+      .map((file) => {
+        const filePath = path.join(logDir, file);
+        const stats = fs.statSync(filePath);
+        return {
+          fileName: file,
+          lastModified: stats.mtime,
+        };
+      })
+      .sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime()) // Sort by last modified time (newest first)
+      .map((fileInfo) => fileInfo.fileName);
 
     return files
       .slice(0, 10)
       .map((file, index) => {
         try {
-          const content = JSON.parse(
-            fs.readFileSync(path.join(logDir, file), "utf8")
-          );
+          const filePath = path.join(logDir, file);
+          const stats = fs.statSync(filePath);
+          const content = JSON.parse(fs.readFileSync(filePath, "utf8"));
           const lastUserMessage = [...content]
             .reverse()
             .find((msg: any) => msg.role === "user");
@@ -68,6 +79,7 @@ const main = async () => {
               (msg: any) => msg.role === "user" || msg.role === "assistant"
             ).length,
             fileName: file,
+            lastModified: stats.mtime,
           };
         } catch (error) {
           return null;
@@ -100,18 +112,30 @@ const main = async () => {
       return null;
     }
 
-    console.log("🕐 Previous Conversations:");
+    console.log("🕐 Previous Conversations (sorted by last activity):");
     console.log("─".repeat(80));
     console.log(
-      "ID | Timestamp           | Last Message                      | Messages"
+      "ID | Last Modified       | Last Message                      | Messages"
     );
     console.log("─".repeat(80));
 
     conversations.forEach((conv) => {
+      const lastModifiedStr = conv.lastModified
+        ? conv.lastModified
+            .toLocaleString("en-US", {
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            })
+            .replace(",", "")
+        : conv.timestamp;
+
       console.log(
-        `${conv.id.padStart(2)} | ${conv.timestamp} | ${conv.lastMessage.padEnd(
-          35
-        )} | ${conv.messageCount}`
+        `${conv.id.padStart(2)} | ${lastModifiedStr.padEnd(
+          19
+        )} | ${conv.lastMessage.padEnd(35)} | ${conv.messageCount}`
       );
     });
 
@@ -154,13 +178,6 @@ const main = async () => {
           maxBuffer: 5 * 1024 * 1024,
           cwd: process.cwd(),
         });
-
-        if (stdout) {
-          console.log(stdout);
-        }
-        if (stderr) {
-          console.error(stderr);
-        }
 
         return {
           success: true,
