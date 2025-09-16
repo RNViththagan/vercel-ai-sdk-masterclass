@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "claude-terminal": "tsx src/claude-terminal.ts",
+    "claude-terminal-resume": "tsx src/claude-terminal-resume.ts",
     "generate-object": "tsx src/generate-object.ts",
     "search-queries": "tsx src/search-queries.ts",
     "cache-demo": "tsx src/cache-demo.ts",

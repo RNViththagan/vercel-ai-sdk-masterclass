@@ -27,22 +27,26 @@ src/
 ## 🛠️ Setup
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/RNViththagan/vercel-ai-sdk-masterclass.git
    cd vercel-ai-sdk-masterclass
    ```
 
 2. **Install dependencies:**
+
    ```bash
    npm install
    ```
 
 3. **Configure environment variables:**
+
    ```bash
    cp .env.example .env
    ```
 
    Add your API keys to `.env`:
+
    ```
    ANTHROPIC_API_KEY=your_anthropic_key_here
    OPENAI_API_KEY=your_openai_key_here
@@ -55,56 +59,103 @@ src/
 ## 🎯 Available Examples
 
 ### 1. Weather Demo with Tools (`index.ts`)
+
 Demonstrates tool usage, structured output, and multi-step reasoning.
 
 **Features:**
+
 - Weather API integration
 - Number addition tool
 - Structured output with schemas
 - Multi-step tool execution
 
 **Run it:**
+
 ```bash
 npm run dev
 ```
 
 ### 2. Claude Terminal Agent (`claude-terminal.ts`)
+
 An interactive AI assistant that can execute terminal commands and maintain conversations.
 
 **Features:**
+
 - Terminal command execution
 - Real-time command output
 - Conversation memory
 - Streaming responses
 
 **Run it:**
+
 ```bash
 npm run claude-terminal
 ```
 
-### 3. Object Generation Examples (`generate-object.ts`)
+### 3. Claude Terminal with Resume (`claude-terminal-resume.ts`)
+
+Enhanced version of Claude terminal with conversation management and resume capabilities.
+
+**Features:**
+
+- Resume any of your last 10 conversations
+- Conversation browser with metadata
+- Auto-save after each exchange
+- Special commands: `save`, `history`, `exit`
+- Context preview when resuming
+- Full conversation management utilities
+
+**Run it:**
+
+```bash
+npm run claude-terminal-resume
+```
+
+**Conversation Management:**
+
+```bash
+# List all conversations
+node conversation-utils.js list
+
+# Show conversation details
+node conversation-utils.js show 1
+
+# Export conversation to text
+node conversation-utils.js export 1 txt
+
+# Delete a conversation
+node conversation-utils.js delete 1
+```
+
+### 4. Object Generation Examples (`generate-object.ts`)
+
 Demonstrates structured data generation with Zod schemas.
 
 **Features:**
+
 - Schema-based object generation
 - AI agent definitions with jargon
 - Type-safe outputs
 
 **Run it:**
+
 ```bash
 npm run generate-object
 ```
 
-### 4. Search Query Generator (`search-queries.ts`)
+### 5. Search Query Generator (`search-queries.ts`)
+
 AI-powered search query generation with web search integration.
 
 **Features:**
+
 - Multiple search query variations
 - Real-time web search with Exa
 - Search result processing
 - File export capabilities
 
 **Run it:**
+
 ```bash
 npm run search-queries
 ```
@@ -120,6 +171,9 @@ npm run dev
 # Claude terminal agent
 npm run claude-terminal
 
+# Claude terminal with resume
+npm run claude-terminal-resume
+
 # Object generation examples
 npm run generate-object
 
@@ -128,6 +182,7 @@ npm run search-queries
 ```
 
 ### Running any file directly:
+
 ```bash
 npx tsx src/<filename>    # Run any specific TypeScript file
 ```
@@ -167,6 +222,7 @@ Generated:
 ## 📚 Dependencies
 
 ### Core AI SDK
+
 - **@ai-sdk/anthropic**: Anthropic Claude integration
 - **@ai-sdk/openai**: OpenAI GPT integration
 - **@ai-sdk/google**: Google AI integration
@@ -174,11 +230,13 @@ Generated:
 - **ai**: Vercel AI SDK core
 
 ### Additional Tools
+
 - **exa-js**: Real-time web search capabilities
 - **zod**: Schema validation and type safety
 - **dotenv**: Environment variable management
 
 ### Development
+
 - **tsx**: TypeScript execution
 - **@types/node**: Node.js type definitions
 
