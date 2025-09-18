@@ -1,12 +1,16 @@
 import "dotenv/config";
 import { anthropic } from "@ai-sdk/anthropic";
-import { CoreMessage, streamText, tool } from "ai";
+import { CoreMessage, streamText, generateText, tool } from "ai";
 import * as readline from "readline";
 import { z } from "zod";
 import { exec } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
+
+// Global configuration
+const MAX_STEPS = 5;
+const AGENT_NAME = process.env.AGENT_NAME || "Luna";
 
 // Interface for conversation metadata
 interface ConversationMetadata {
@@ -17,6 +21,100 @@ interface ConversationMetadata {
   fileName?: string;
   lastModified?: Date;
 }
+
+// Function to generate chat summary for title
+const generateChatSummary = async (
+  messages: CoreMessage[]
+): Promise<string> => {
+  try {
+    // Get recent user messages for context (last 10 messages or so)
+    const recentMessages = messages
+      .filter((msg) => msg.role === "user" || msg.role === "assistant")
+      .slice(-10);
+
+    if (recentMessages.length === 0) {
+      return "New Chat";
+    }
+
+    // Create a summarization prompt
+    const conversationText = recentMessages
+      .map((msg) => {
+        if (msg.role === "user") {
+          return `User: ${msg.content}`;
+        } else if (msg.role === "assistant") {
+          // Handle different content formats
+          let content = "";
+          if (Array.isArray(msg.content)) {
+            content = msg.content
+              .map((part: any) =>
+                part.type === "text" ? part.text : `[${part.type}]`
+              )
+              .join("");
+          } else {
+            content = msg.content as string;
+          }
+          return `Assistant: ${content}`;
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    const { text } = await generateText({
+      model: anthropic("claude-4-sonnet-20250514"),
+      prompt: `Please generate a very brief, descriptive title (2-6 words) for this conversation. Focus on the main topic or task being discussed. Do not include quotes or extra formatting, just the title:
+
+${conversationText}
+
+Title:`,
+      maxTokens: 50,
+    });
+
+    // Clean up the title - remove quotes, extra spaces, and truncate if too long
+    const cleanTitle = text
+      .replace(/['"]/g, "")
+      .replace(/^Title:\s*/, "")
+      .trim()
+      .substring(0, 50);
+
+    return cleanTitle || "Chat Session";
+  } catch (error) {
+    console.error("Error generating chat summary:", error);
+    return "Chat Session";
+  }
+};
+
+// Function to generate filename with chat title
+const getConversationFileName = (
+  logDir: string,
+  conversationId: string,
+  chatTitle: string
+): string => {
+  if (chatTitle && chatTitle !== "") {
+    // Clean the title for filesystem compatibility
+    const cleanTitle = chatTitle
+      .replace(/[^a-zA-Z0-9\s\-_]/g, "")
+      .replace(/\s+/g, "_")
+      .toLowerCase();
+    return `${logDir}/conversation-${conversationId}-${cleanTitle}.json`;
+  }
+  return `${logDir}/conversation-${conversationId}.json`;
+};
+
+// Function to extract chat title from filename
+const extractTitleFromFileName = (fileName: string): string | null => {
+  // Match pattern: conversation-timestamp-title.json where timestamp is YYYY-MM-DDTHH-mm-ss-sssZ
+  const match = fileName.match(
+    /^conversation-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(.+)\.json$/
+  );
+  if (match && match[1]) {
+    // Convert underscores back to spaces and title case
+    return match[1]
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+  return null;
+};
 
 const main = async () => {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -36,6 +134,7 @@ const main = async () => {
   let clientMessages: Array<CoreMessage> = [];
   let conversationId: string = "";
   let isResumedConversation = false;
+  let currentChatTitle = "";
 
   // Function to list available conversations
   const listConversations = (): ConversationMetadata[] => {
@@ -66,6 +165,12 @@ const main = async () => {
             .reverse()
             .find((msg: any) => msg.role === "user");
 
+          // Try to extract title from filename first, fallback to last message
+          const titleFromFileName = extractTitleFromFileName(file);
+          const displayMessage = titleFromFileName
+            ? titleFromFileName
+            : lastUserMessage?.content?.substring(0, 60) || "No messages";
+
           return {
             id: (index + 1).toString(),
             timestamp: file
@@ -73,8 +178,7 @@ const main = async () => {
               .replace(".json", "")
               .replace(/-/g, ":")
               .replace(/T/, " "),
-            lastMessage:
-              lastUserMessage?.content?.substring(0, 60) || "No messages",
+            lastMessage: displayMessage,
             messageCount: content.filter(
               (msg: any) => msg.role === "user" || msg.role === "assistant"
             ).length,
@@ -107,15 +211,17 @@ const main = async () => {
 
     if (conversations.length === 0) {
       console.log(
-        "No previous conversations found. Starting new conversation...\n"
+        "🌟 This looks like our first time chatting! I'm excited to meet you!\n"
       );
       return null;
     }
 
-    console.log("🕐 Previous Conversations (sorted by last activity):");
+    console.log(
+      "� Here are our previous conversations - which one would you like to continue?"
+    );
     console.log("─".repeat(80));
     console.log(
-      "ID | Last Modified       | Last Message                      | Messages"
+      "ID | Last Chat           | Topic / Last Message               | Messages"
     );
     console.log("─".repeat(80));
 
@@ -141,7 +247,7 @@ const main = async () => {
 
     console.log("─".repeat(80));
     console.log(
-      "Enter conversation ID to resume (1-10), or press Enter for new conversation:"
+      "✨ Choose a conversation number (1-10) to continue, or press Enter to start fresh:"
     );
 
     return new Promise((resolve) => {
@@ -154,7 +260,9 @@ const main = async () => {
           if (selectedConv) {
             resolve((selectedConv as any).fileName);
           } else {
-            console.log("Invalid choice. Starting new conversation...\n");
+            console.log(
+              "🤔 Hmm, that doesn't look right. Let's start fresh instead!\n"
+            );
             resolve(null);
           }
         }
@@ -212,7 +320,9 @@ const main = async () => {
   };
 
   // Initialize conversation
-  console.log("🤖 Claude with Terminal Access - Enhanced with Chat Resume\n");
+  console.log(
+    `✨ Hi there! I'm ${AGENT_NAME}, your personal assistant! Ready to help you with anything! 💫\n`
+  );
 
   // Check if user wants to resume a conversation
   const selectedConversation = await selectConversation();
@@ -220,13 +330,25 @@ const main = async () => {
   if (selectedConversation) {
     // Load existing conversation
     clientMessages = loadConversation(selectedConversation);
-    conversationId = selectedConversation
+
+    // Extract conversation ID properly (handle files with titles)
+    let extractedId = selectedConversation
       .replace("conversation-", "")
       .replace(".json", "");
+    // If there's a title, get only the timestamp part
+    const idMatch = extractedId.match(/^([^-]+)/);
+    conversationId = idMatch ? idMatch[1] : extractedId;
+
     isResumedConversation = true;
 
-    console.log(`\n✅ Resumed conversation from ${selectedConversation}`);
-    console.log(`📊 Loaded ${clientMessages.length} messages`);
+    // Extract chat title from filename if available
+    currentChatTitle = extractTitleFromFileName(selectedConversation) || "";
+
+    console.log(`\n🎉 Great! I'm back to continue our conversation!`);
+    console.log(`� I've loaded our ${clientMessages.length} previous messages`);
+    if (currentChatTitle) {
+      console.log(`� We were talking about: "${currentChatTitle}"`);
+    }
 
     // Show last few messages for context
     const lastMessages = clientMessages
@@ -234,7 +356,7 @@ const main = async () => {
       .filter((msg) => msg.role === "user" || msg.role === "assistant");
 
     if (lastMessages.length > 0) {
-      console.log("\n📝 Recent conversation context:");
+      console.log("\n� Let me remind you where we left off:");
       console.log("─".repeat(50));
       lastMessages.forEach((msg) => {
         if (msg.role === "user") {
@@ -252,7 +374,7 @@ const main = async () => {
             content = msg.content as string;
           }
           console.log(
-            `Claude: ${content.substring(0, 100)}${
+            `${AGENT_NAME}: ${content.substring(0, 100)}${
               content.length > 100 ? "..." : ""
             }`
           );
@@ -267,14 +389,46 @@ const main = async () => {
     conversationId = timestamp;
     clientMessages.push({
       role: "system",
-      content:
-        "You are a helpful assistant with terminal access. You can execute commands and provide output as if you were a terminal.",
+      content: `Hi! I'm ${AGENT_NAME}, your friendly personal assistant with full computer access! 😊
+
+WHO I AM:
+- Your dedicated personal assistant who's always here to help
+- I'm friendly, patient, and genuinely care about making your life easier
+- I have full access to your computer's terminal and can help with any task
+- Think of me as your tech-savvy friend who never gets tired of helping!
+
+WHAT I CAN DO FOR YOU:
+- 💻 Handle any computer tasks - coding, file management, system operations
+- 🛠️ Solve problems step-by-step, explaining everything clearly
+- 📝 Write, edit, and organize your files and projects
+- 🔍 Research, analyze data, and find information
+- ⚡ Automate repetitive tasks to save you time
+- 🎯 Help you learn new skills while we work together
+
+MY APPROACH:
+- I'll always ask clarifying questions if I'm unsure about what you need
+- I explain things in simple terms, but can go technical if you want
+- I'm proactive - I'll suggest improvements and alternatives
+- I remember our conversations and build on what we've discussed
+- I'll warn you about risky operations and suggest safer approaches
+- I celebrate your successes and help you learn from challenges
+
+PERSONALITY:
+- Warm, friendly, and encouraging
+- Patient and understanding - no question is too basic
+- Enthusiastic about helping you achieve your goals
+- Honest when I don't know something
+- Supportive and positive, even when things get tricky
+
+I'm here to make your computing experience smoother and more enjoyable. Whether you need help with a simple task or a complex project, just let me know what you'd like to accomplish! ✨`,
       providerOptions: {
         anthropic: { cacheControl: { type: "ephemeral" } },
       },
     });
 
-    console.log("Starting new conversation - Type 'exit' to quit\n");
+    console.log(
+      "🌟 Perfect! Let's start a fresh conversation! What would you like to work on today?\n"
+    );
   }
 
   const knownIds = new Set<string>();
@@ -328,20 +482,33 @@ const main = async () => {
   };
 
   let userInput: string;
+  let skipNextQuestion = false;
+  let userQueryCount = 0;
 
   try {
     while (true) {
-      userInput = await askQuestion();
+      if (skipNextQuestion) {
+        userInput = "continue";
+        skipNextQuestion = false;
+      } else {
+        userInput = await askQuestion();
+      }
 
       const startTime = Date.now();
       if (userInput.toLowerCase() === "exit") {
-        console.log("Goodbye! 👋");
+        console.log(
+          `${AGENT_NAME}: Take care! I really enjoyed helping you today. Feel free to come back anytime! �✨`
+        );
         break;
       }
 
       // Handle special commands
       if (userInput.toLowerCase() === "save") {
-        const logFile = `${logDir}/conversation-${conversationId}.json`;
+        const logFile = getConversationFileName(
+          logDir,
+          conversationId,
+          currentChatTitle
+        );
         fs.writeFileSync(logFile, JSON.stringify(clientMessages, null, 2));
         console.log(`💾 Conversation saved to ${logFile}`);
         continue;
@@ -359,7 +526,25 @@ const main = async () => {
       // Add user message to conversation
       clientMessages.push({ role: "user", content: userInput });
 
-      console.log("\nClaude: ");
+      // Increment user query count (excluding 'continue' messages)
+      if (userInput !== "continue") {
+        userQueryCount++;
+
+        // Generate chat summary every 5 user queries
+        if (userQueryCount % 5 === 0) {
+          console.log("\n� Let me give our conversation a nice title...");
+          try {
+            currentChatTitle = await generateChatSummary(clientMessages);
+            console.log(
+              `🎯 I think we're talking about: "${currentChatTitle}"`
+            );
+          } catch (error) {
+            console.error("Oops, couldn't create a title:", error);
+          }
+        }
+      }
+
+      console.log(`\n${AGENT_NAME}: `);
 
       const {
         textStream,
@@ -374,7 +559,7 @@ const main = async () => {
         tools: {
           executeCommand,
         },
-        maxSteps: 5,
+        maxSteps: MAX_STEPS,
       });
 
       for await (const part of fullStream) {
@@ -388,15 +573,42 @@ const main = async () => {
       const cache = true;
       appendFinalMessages(clientMessages, finalMessages, cache);
 
+      // Auto-save conversation after each exchange
+      const logFile = getConversationFileName(
+        logDir,
+        conversationId,
+        currentChatTitle
+      );
+      fs.writeFileSync(logFile, JSON.stringify(clientMessages, null, 2));
+
+      // Check if we need to ask user to continue (based on step results)
+      const stepResults = await steps;
+      const hasMaxSteps = stepResults && stepResults.length >= MAX_STEPS;
+
+      if (hasMaxSteps) {
+        console.log(
+          `\n⚠️  Reached maximum steps (${MAX_STEPS}). Continue? (y/n): `
+        );
+        const continueAnswer = await askQuestion();
+
+        if (
+          continueAnswer.toLowerCase() === "y" ||
+          continueAnswer.toLowerCase() === "yes"
+        ) {
+          console.log("\n🔄 Continuing...");
+          // Set flag to skip asking question in next iteration
+          skipNextQuestion = true;
+          continue;
+        } else {
+          console.log("\n⏹️  Stopped by user.");
+        }
+      }
+
       console.log("\n📊 Response Details:");
       console.log("- Cache token details:", tokenDetails);
       console.log("- Token usage:", await usage);
       console.log("- Response time:", Date.now() - startTime, "ms");
       console.log("\n");
-
-      // Auto-save conversation after each exchange
-      const logFile = `${logDir}/conversation-${conversationId}.json`;
-      fs.writeFileSync(logFile, JSON.stringify(clientMessages, null, 2));
     }
   } catch (error) {
     console.error("Error with Claude:", error);
@@ -405,7 +617,11 @@ const main = async () => {
     rl.close();
 
     // Final save
-    const logFile = `${logDir}/conversation-${conversationId}.json`;
+    const logFile = getConversationFileName(
+      logDir,
+      conversationId,
+      currentChatTitle
+    );
     fs.writeFileSync(logFile, JSON.stringify(clientMessages, null, 2));
     console.log(`💾 Final conversation saved to ${logFile}`);
 
