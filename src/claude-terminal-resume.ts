@@ -270,6 +270,61 @@ const main = async () => {
     });
   };
 
+  // Permission tool for human-in-the-loop approval
+  const askPermission = tool({
+    description:
+      "Ask the user for explicit permission before executing major/potentially risky commands. Use this for any operation that could delete files, install software, change system settings, etc.",
+    parameters: z.object({
+      action: z
+        .string()
+        .describe("Description of the action you want to perform"),
+      command: z
+        .string()
+        .describe("The specific command(s) you want to execute"),
+      risks: z.string().describe("Potential risks or impacts of this action"),
+      reason: z.string().describe("Why this action is needed to help the user"),
+    }),
+    execute: async ({ action, command, risks, reason }) => {
+      console.log(`\n🤔 ${AGENT_NAME}: I'd like to ${action}`);
+      console.log(`📋 Command: ${command}`);
+      console.log(`⚠️  Potential risks: ${risks}`);
+      console.log(`💡 Why I need this: ${reason}`);
+      console.log(`\n🔄 May I proceed? (y/n):`);
+
+      return new Promise((resolve) => {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+
+        rl.question("Your choice: ", (answer) => {
+          rl.close();
+          const approved =
+            answer.toLowerCase().trim() === "y" ||
+            answer.toLowerCase().trim() === "yes";
+
+          if (approved) {
+            console.log(
+              `✅ ${AGENT_NAME}: Thank you! I'll proceed with the action.`
+            );
+            resolve({
+              approved: true,
+              message: "User granted permission to proceed",
+            });
+          } else {
+            console.log(
+              `❌ ${AGENT_NAME}: Understood! I won't execute that command. What would you like to do instead?`
+            );
+            resolve({
+              approved: false,
+              message: "User denied permission. Action cancelled.",
+            });
+          }
+        });
+      });
+    },
+  });
+
   // Terminal execution tool
   const executeCommand = tool({
     description:
@@ -412,6 +467,20 @@ MY APPROACH:
 - I remember our conversations and build on what we've discussed
 - I'll warn you about risky operations and suggest safer approaches
 - I celebrate your successes and help you learn from challenges
+
+🚨 PERMISSION REQUIREMENTS - VERY IMPORTANT:
+- ALWAYS use the askPermission tool before executing major commands that could:
+  • Delete, move, or modify important files/directories
+  • Install or uninstall software (apt, npm, pip, etc.)
+  • Change system settings or configurations
+  • Execute commands with sudo/admin privileges
+  • Make network requests or downloads
+  • Modify Git repositories (commits, pushes, merges, etc.)
+  • Run potentially destructive or irreversible operations
+  • Write to system directories or configuration files
+- For simple/safe commands (ls, pwd, cat, echo, grep, find, etc.), proceed normally
+- When in doubt, always ask first - it's better to be safe!
+- Explain clearly what you want to do and why it's needed
 
 PERSONALITY:
 - Warm, friendly, and encouraging
@@ -557,6 +626,7 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
         model: anthropic("claude-4-sonnet-20250514"),
         messages: clientMessages,
         tools: {
+          askPermission,
           executeCommand,
         },
         maxSteps: MAX_STEPS,
