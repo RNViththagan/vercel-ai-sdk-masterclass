@@ -395,13 +395,8 @@ const main = async () => {
       console.log(`\n🔄 May I proceed? (y/n):`);
 
       return new Promise((resolve) => {
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        });
-
+        // Use the main readline interface instead of creating a new one
         rl.question("Your choice: ", (answer) => {
-          rl.close();
           const approved =
             answer.toLowerCase().trim() === "y" ||
             answer.toLowerCase().trim() === "yes";
