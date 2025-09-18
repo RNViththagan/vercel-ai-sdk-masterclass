@@ -474,19 +474,10 @@ const main = async () => {
 
   const askContinueQuestion = (): Promise<string> => {
     return new Promise((resolve) => {
-      // Ensure we have a fresh readline interface for this critical question
-      const tempRl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
+      // Use the main readline interface instead of creating a new one
+      rl.question("Your choice: ", (answer) => {
+        resolve(answer.trim());
       });
-
-      // Add a small delay to ensure output is flushed
-      setTimeout(() => {
-        tempRl.question("Your choice: ", (answer) => {
-          tempRl.close();
-          resolve(answer.trim());
-        });
-      }, 100);
     });
   };
 
