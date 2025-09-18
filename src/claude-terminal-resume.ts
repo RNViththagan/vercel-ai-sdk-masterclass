@@ -24,7 +24,9 @@ interface ConversationMetadata {
 
 // Function to generate chat summary for title
 const generateChatSummary = async (
-  messages: CoreMessage[]
+  messages: CoreMessage[],
+  isFirstMessage: boolean = false,
+  currentTitle: string = ""
 ): Promise<string> => {
   try {
     // Get recent user messages for context (last 10 messages or so)
@@ -60,13 +62,33 @@ const generateChatSummary = async (
       .filter(Boolean)
       .join("\n");
 
-    const { text } = await generateText({
-      model: anthropic("claude-4-sonnet-20250514"),
-      prompt: `Please generate a very brief, descriptive title (2-6 words) for this conversation. Focus on the main topic or task being discussed. Do not include quotes or extra formatting, just the title:
+    let promptText: string;
+
+    if (isFirstMessage) {
+      promptText = `Please generate a very brief, descriptive title (2-6 words) based on what the user is asking about or wants to accomplish. Focus on the main topic or task. Do not include quotes or extra formatting, just the title:
 
 ${conversationText}
 
-Title:`,
+Title:`;
+    } else if (currentTitle) {
+      promptText = `The current conversation title is: "${currentTitle}"
+
+Based on the recent conversation below, please generate a very brief, descriptive title (2-6 words) that captures the main topic or task being discussed. Try to keep it similar to the current title if the topic hasn't changed significantly, but update it if the conversation has evolved to a new focus. Do not include quotes or extra formatting, just the title:
+
+${conversationText}
+
+Title:`;
+    } else {
+      promptText = `Please generate a very brief, descriptive title (2-6 words) for this conversation. Focus on the main topic or task being discussed. Do not include quotes or extra formatting, just the title:
+
+${conversationText}
+
+Title:`;
+    }
+
+    const { text } = await generateText({
+      model: anthropic("claude-4-sonnet-20250514"),
+      prompt: promptText,
       maxTokens: 50,
     });
 
@@ -105,17 +127,95 @@ const getConversationFileName = (
 const extractTitleFromFileName = (fileName: string): string | null => {
   // Match pattern: conversation-timestamp-title.json where timestamp is YYYY-MM-DDTHH-mm-ss-sssZ
   const match = fileName.match(
-    /^conversation-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(.+)\.json$/
+    /^conversation-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)-(.+)\.json$/
   );
-  if (match && match[1]) {
+  if (match && match[2]) {
     // Convert underscores back to spaces and title case
-    return match[1]
+    return match[2]
       .replace(/_/g, " ")
       .replace(/\b\w/g, (char) => char.toUpperCase());
   }
   return null;
 };
 
+// Function to validate and ensure conversation ID is in proper timestamp format
+const ensureProperConversationId = (
+  id: string,
+  fallbackTimestamp: string
+): string => {
+  // Check if it's already in proper timestamp format: YYYY-MM-DDTHH-mm-ss-sssZ
+  const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
+
+  if (timestampPattern.test(id)) {
+    return id;
+  }
+
+  // If it's not in proper format, use the fallback timestamp
+  console.log(
+    `⚠️  Conversation ID "${id}" is not in proper timestamp format, using fallback.`
+  );
+  return fallbackTimestamp;
+};
+
+// Function to update filename when title changes
+const updateConversationFile = (
+  logDir: string,
+  oldFilePath: string,
+  conversationId: string,
+  newTitle: string
+): string => {
+  try {
+    const newFilePath = getConversationFileName(
+      logDir,
+      conversationId,
+      newTitle
+    );
+
+    if (oldFilePath !== newFilePath && fs.existsSync(oldFilePath)) {
+      // Check if new file already exists to avoid overwriting
+      if (!fs.existsSync(newFilePath)) {
+        fs.renameSync(oldFilePath, newFilePath);
+        console.log(`📝 Updated filename to reflect current topic`);
+        return newFilePath;
+      }
+    }
+  } catch (error) {
+    console.error("Could not update filename:", error);
+  }
+  return oldFilePath;
+};
+
+// Function to fix malformed conversation filenames
+const fixMalformedFilename = (
+  logDir: string,
+  malformedFileName: string,
+  properConversationId: string,
+  title: string = ""
+): string => {
+  try {
+    const oldFilePath = path.join(logDir, malformedFileName);
+    const newFilePath = getConversationFileName(
+      logDir,
+      properConversationId,
+      title
+    );
+
+    if (oldFilePath !== newFilePath && fs.existsSync(oldFilePath)) {
+      if (!fs.existsSync(newFilePath)) {
+        fs.renameSync(oldFilePath, newFilePath);
+        console.log(
+          `🔧 Fixed malformed filename: ${malformedFileName} → ${path.basename(
+            newFilePath
+          )}`
+        );
+        return newFilePath;
+      }
+    }
+  } catch (error) {
+    console.error("Could not fix malformed filename:", error);
+  }
+  return path.join(logDir, malformedFileName);
+};
 const main = async () => {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const execAsync = promisify(exec);
@@ -135,6 +235,9 @@ const main = async () => {
   let conversationId: string = "";
   let isResumedConversation = false;
   let currentChatTitle = "";
+  let messageCount = 0; // Count total messages (user + assistant)
+  let isFirstUserInput = true; // Track if this is the very first user input
+  let currentFilePath = ""; // Track current file path for title updates
 
   // Function to list available conversations
   const listConversations = (): ConversationMetadata[] => {
@@ -390,19 +493,76 @@ const main = async () => {
     let extractedId = selectedConversation
       .replace("conversation-", "")
       .replace(".json", "");
+
     // If there's a title, get only the timestamp part
-    const idMatch = extractedId.match(/^([^-]+)/);
-    conversationId = idMatch ? idMatch[1] : extractedId;
+    // Match pattern: YYYY-MM-DDTHH-mm-ss-sssZ (timestamp format)
+    const timestampMatch = extractedId.match(
+      /^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)/
+    );
+    let candidateId = timestampMatch ? timestampMatch[1] : extractedId;
+
+    // Ensure the conversation ID is in proper timestamp format
+    conversationId = ensureProperConversationId(candidateId, timestamp);
+
+    // If the conversation ID was invalid/malformed, fix the filename
+    if (candidateId !== conversationId) {
+      currentFilePath = fixMalformedFilename(
+        logDir,
+        selectedConversation,
+        conversationId,
+        currentChatTitle
+      );
+    } else {
+      currentFilePath = path.join(logDir, selectedConversation);
+    }
 
     isResumedConversation = true;
 
     // Extract chat title from filename if available
     currentChatTitle = extractTitleFromFileName(selectedConversation) || "";
 
+    // If no title exists and we have messages, generate one
+    if (!currentChatTitle && clientMessages.length > 1) {
+      console.log(
+        "\n🎯 This conversation doesn't have a title yet. Let me create one..."
+      );
+      try {
+        currentChatTitle = await generateChatSummary(clientMessages);
+        console.log(`✨ Generated title: "${currentChatTitle}"`);
+
+        // Update the filename with the new title
+        currentFilePath = updateConversationFile(
+          logDir,
+          currentFilePath,
+          conversationId,
+          currentChatTitle
+        );
+      } catch (error) {
+        console.error("Could not generate title:", error);
+        currentChatTitle = "";
+      }
+    }
+
+    // If currentFilePath wasn't set above, set it now
+    if (!currentFilePath) {
+      currentFilePath = getConversationFileName(
+        logDir,
+        conversationId,
+        currentChatTitle
+      );
+    }
+
+    // Initialize message count for resumed conversations
+    messageCount = clientMessages.filter(
+      (msg) => msg.role === "user" || msg.role === "assistant"
+    ).length;
+
     console.log(`\n🎉 Great! I'm back to continue our conversation!`);
-    console.log(`� I've loaded our ${clientMessages.length} previous messages`);
+    console.log(
+      `💬 I've loaded our ${clientMessages.length} previous messages`
+    );
     if (currentChatTitle) {
-      console.log(`� We were talking about: "${currentChatTitle}"`);
+      console.log(`💭 We were talking about: "${currentChatTitle}"`);
     }
 
     // Show last few messages for context
@@ -442,6 +602,7 @@ const main = async () => {
   } else {
     // Start new conversation
     conversationId = timestamp;
+    currentFilePath = getConversationFileName(logDir, conversationId, "");
     clientMessages.push({
       role: "system",
       content: `Hi! I'm ${AGENT_NAME}, your friendly personal assistant with full computer access! 😊
@@ -552,7 +713,9 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
 
   let userInput: string;
   let skipNextQuestion = false;
-  let userQueryCount = 0;
+
+  // Set initial values based on whether this is a resumed conversation
+  isFirstUserInput = !isResumedConversation;
 
   try {
     while (true) {
@@ -566,20 +729,20 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
       const startTime = Date.now();
       if (userInput.toLowerCase() === "exit") {
         console.log(
-          `${AGENT_NAME}: Take care! I really enjoyed helping you today. Feel free to come back anytime! �✨`
+          `${AGENT_NAME}: Take care! I really enjoyed helping you today. Feel free to come back anytime! ✨`
         );
         break;
       }
 
       // Handle special commands
       if (userInput.toLowerCase() === "save") {
-        const logFile = getConversationFileName(
-          logDir,
-          conversationId,
-          currentChatTitle
+        fs.writeFileSync(
+          currentFilePath,
+          JSON.stringify(clientMessages, null, 2)
         );
-        fs.writeFileSync(logFile, JSON.stringify(clientMessages, null, 2));
-        console.log(`💾 Conversation saved to ${logFile}`);
+        console.log(
+          `💾 Conversation saved to ${path.basename(currentFilePath)}`
+        );
         continue;
       }
 
@@ -589,27 +752,55 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
         );
         console.log(`🆔 Conversation ID: ${conversationId}`);
         console.log(`🔄 Resumed: ${isResumedConversation ? "Yes" : "No"}`);
+        if (currentChatTitle) {
+          console.log(`💭 Current title: "${currentChatTitle}"`);
+        }
         continue;
       }
 
       // Add user message to conversation
       clientMessages.push({ role: "user", content: userInput });
+      messageCount++;
 
-      // Increment user query count (excluding 'continue' messages)
-      if (userInput !== "continue") {
-        userQueryCount++;
+      // Generate title based on first user input for new conversations
+      if (isFirstUserInput && userInput !== "continue") {
+        console.log("\n✨ Let me create a title for our conversation...");
+        try {
+          currentChatTitle = await generateChatSummary(clientMessages, true);
+          console.log(`🎯 Our conversation topic: "${currentChatTitle}"`);
 
-        // Generate chat summary every 5 user queries
-        if (userQueryCount % 5 === 0) {
-          console.log("\n� Let me give our conversation a nice title...");
-          try {
-            currentChatTitle = await generateChatSummary(clientMessages);
-            console.log(
-              `🎯 I think we're talking about: "${currentChatTitle}"`
-            );
-          } catch (error) {
-            console.error("Oops, couldn't create a title:", error);
+          // Update filename with the new title
+          currentFilePath = updateConversationFile(
+            logDir,
+            currentFilePath,
+            conversationId,
+            currentChatTitle
+          );
+
+          isFirstUserInput = false;
+        } catch (error) {
+          console.error("Oops, couldn't create a title:", error);
+          isFirstUserInput = false;
+        }
+      }
+
+      // Update title every 5 total messages (user + assistant messages)
+      if (messageCount > 0 && messageCount % 5 === 0 && !isFirstUserInput) {
+        console.log("\n🔄 Updating our conversation title...");
+        try {
+          const newTitle = await generateChatSummary(
+            clientMessages,
+            false,
+            currentChatTitle
+          );
+          if (newTitle !== currentChatTitle) {
+            console.log(`📝 Title updated to: "${newTitle}"`);
+            currentChatTitle = newTitle;
+          } else {
+            console.log(`✓ Title remains: "${currentChatTitle}"`);
           }
+        } catch (error) {
+          console.error("Oops, couldn't update the title:", error);
         }
       }
 
@@ -643,13 +834,52 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
       const cache = true;
       appendFinalMessages(clientMessages, finalMessages, cache);
 
-      // Auto-save conversation after each exchange
-      const logFile = getConversationFileName(
-        logDir,
-        conversationId,
+      // Count assistant messages added (typically 1, but could be more with tool calls)
+      const assistantMessagesAdded = finalMessages.filter(
+        (msg) => msg.role === "assistant"
+      ).length;
+      messageCount += assistantMessagesAdded;
+
+      // Check if we should update title after assistant response
+      if (
+        messageCount > 0 &&
+        messageCount % 5 === 0 &&
+        !isFirstUserInput &&
         currentChatTitle
+      ) {
+        console.log(
+          "\n🔄 Updating our conversation title after recent exchanges..."
+        );
+        try {
+          const newTitle = await generateChatSummary(
+            clientMessages,
+            false,
+            currentChatTitle
+          );
+          if (newTitle !== currentChatTitle) {
+            console.log(`📝 Title updated to: "${newTitle}"`);
+
+            // Update filename with the new title
+            currentFilePath = updateConversationFile(
+              logDir,
+              currentFilePath,
+              conversationId,
+              newTitle
+            );
+            currentChatTitle = newTitle;
+          } else {
+            console.log(`✓ Title remains: "${currentChatTitle}"`);
+          }
+        } catch (error) {
+          console.error("Oops, couldn't update the title:", error);
+        }
+      }
+
+      // Auto-save conversation after each exchange
+      fs.writeFileSync(
+        currentFilePath,
+        JSON.stringify(clientMessages, null, 2)
       );
-      fs.writeFileSync(logFile, JSON.stringify(clientMessages, null, 2));
 
       // Check if we need to ask user to continue (based on step results)
       const stepResults = await steps;
@@ -687,13 +917,10 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
     rl.close();
 
     // Final save
-    const logFile = getConversationFileName(
-      logDir,
-      conversationId,
-      currentChatTitle
+    fs.writeFileSync(currentFilePath, JSON.stringify(clientMessages, null, 2));
+    console.log(
+      `💾 Final conversation saved to ${path.basename(currentFilePath)}`
     );
-    fs.writeFileSync(logFile, JSON.stringify(clientMessages, null, 2));
-    console.log(`💾 Final conversation saved to ${logFile}`);
 
     // Clean up created files
     try {
