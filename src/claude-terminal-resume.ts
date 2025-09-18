@@ -477,6 +477,24 @@ const main = async () => {
     });
   };
 
+  const askContinueQuestion = (): Promise<string> => {
+    return new Promise((resolve) => {
+      // Ensure we have a fresh readline interface for this critical question
+      const tempRl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      // Add a small delay to ensure output is flushed
+      setTimeout(() => {
+        tempRl.question("Your choice: ", (answer) => {
+          tempRl.close();
+          resolve(answer.trim());
+        });
+      }, 100);
+    });
+  };
+
   // Initialize conversation
   console.log(
     `✨ Hi there! I'm ${AGENT_NAME}, your personal assistant! Ready to help you with anything! 💫\n`
@@ -886,21 +904,31 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
       const hasMaxSteps = stepResults && stepResults.length >= MAX_STEPS;
 
       if (hasMaxSteps) {
-        console.log(
+        // Ensure output is flushed and wait a moment
+        process.stdout.write(
           `\n⚠️  Reached maximum steps (${MAX_STEPS}). Continue? (y/n): `
         );
-        const continueAnswer = await askQuestion();
 
-        if (
-          continueAnswer.toLowerCase() === "y" ||
-          continueAnswer.toLowerCase() === "yes"
-        ) {
-          console.log("\n🔄 Continuing...");
-          // Set flag to skip asking question in next iteration
-          skipNextQuestion = true;
-          continue;
-        } else {
-          console.log("\n⏹️  Stopped by user.");
+        try {
+          const continueAnswer = await askContinueQuestion();
+          console.log(`\nReceived answer: "${continueAnswer}"`); // Debug output
+
+          if (
+            continueAnswer.toLowerCase() === "y" ||
+            continueAnswer.toLowerCase() === "yes"
+          ) {
+            console.log("\n🔄 Continuing...");
+            // Set flag to skip asking question in next iteration
+            skipNextQuestion = true;
+            continue;
+          } else {
+            console.log("\n⏹️  Stopped by user.");
+            break; // Exit the while loop when user chooses to stop
+          }
+        } catch (error) {
+          console.error("\n❌ Error getting user input:", error);
+          console.log("\n⏹️  Stopping due to input error.");
+          break;
         }
       }
 
