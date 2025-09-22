@@ -474,10 +474,17 @@ const main = async () => {
 
   const askContinueQuestion = (): Promise<string> => {
     return new Promise((resolve) => {
-      // Use the main readline interface instead of creating a new one
-      rl.question("Your choice: ", (answer) => {
-        resolve(answer.trim());
-      });
+      // Temporarily disable the prompt and handle input directly
+      const originalPrompt = rl.getPrompt();
+      rl.setPrompt("");
+
+      const handleLine = (input: string) => {
+        rl.removeListener("line", handleLine);
+        rl.setPrompt(originalPrompt);
+        resolve(input.trim());
+      };
+
+      rl.on("line", handleLine);
     });
   };
 
@@ -890,25 +897,31 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
       const hasMaxSteps = stepResults && stepResults.length >= MAX_STEPS;
 
       if (hasMaxSteps) {
-        // Ensure output is flushed and wait a moment
+        // Show the prompt on the same line
         process.stdout.write(
           `\n⚠️  Reached maximum steps (${MAX_STEPS}). Continue? (y/n): `
         );
 
         try {
           const continueAnswer = await askContinueQuestion();
-          console.log(`\nReceived answer: "${continueAnswer}"`); // Debug output
+
+          // Clear the line and move cursor back to overwrite the prompt
+          process.stdout.write("\r\x1b[K"); // \r moves to start of line, \x1b[K clears to end of line
 
           if (
             continueAnswer.toLowerCase() === "y" ||
             continueAnswer.toLowerCase() === "yes"
           ) {
-            console.log("\n🔄 Continuing...");
+            console.log(
+              `⚠️  Reached maximum steps (${MAX_STEPS}). Continuing...`
+            );
             // Set flag to skip asking question in next iteration
             skipNextQuestion = true;
             continue;
           } else {
-            console.log("\n⏹️  Stopped by user.");
+            console.log(
+              `⚠️  Reached maximum steps (${MAX_STEPS}). Stopped by user.`
+            );
             break; // Exit the while loop when user chooses to stop
           }
         } catch (error) {
