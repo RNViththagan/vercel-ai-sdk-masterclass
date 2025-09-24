@@ -1,11 +1,12 @@
 import "dotenv/config";
 import { anthropic } from "@ai-sdk/anthropic";
-import { CoreMessage, streamText, tool } from "ai";
+import { ModelMessage, stepCountIs, streamText, tool } from "ai";
 import * as readline from "readline";
 import { z } from "zod";
 import { exec } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs";
+import { appendFinalMessages } from "./utils";
 
 const main = async () => {
   console.log("🤖 Claude with Terminal Access - Type 'exit' to quit\n");
@@ -17,13 +18,13 @@ const main = async () => {
     output: process.stdout,
   });
 
-  const clientMessages: Array<CoreMessage> = [];
+  const clientMessages: Array<ModelMessage> = [];
 
   // Terminal execution tool
   const executeCommand = tool({
     description:
       "Execute terminal commands as if opening a terminal and running them directly. Use this for any command-line operations.",
-    parameters: z.object({
+    inputSchema: z.object({
       command: z.string().describe("The terminal command to execute"),
     }),
     execute: async ({ command }) => {
@@ -86,56 +87,6 @@ const main = async () => {
     },
   });
 
-  const knownIds = new Set<string>();
-  const appendFinalMessages = (
-    history: Array<CoreMessage>,
-    finalMessages: Array<CoreMessage>,
-    cache: boolean
-  ) => {
-    // First, remove cache control from previous assistant messages (except system message)
-    if (cache) {
-      history.forEach((msg) => {
-        if (
-          msg.role === "assistant" &&
-          msg.providerOptions?.anthropic?.cacheControl
-        ) {
-          delete msg.providerOptions.anthropic.cacheControl;
-          // Clean up empty providerOptions
-          if (Object.keys(msg.providerOptions.anthropic).length === 0) {
-            delete msg.providerOptions.anthropic;
-          }
-          if (Object.keys(msg.providerOptions).length === 0) {
-            delete msg.providerOptions;
-          }
-        }
-      });
-    }
-
-    // Then add new messages
-    for (let i = 0; i < finalMessages.length; i++) {
-      const m = finalMessages[i];
-
-      if ((m.role === "assistant" || m.role === "tool") && (m as any).id) {
-        if (!knownIds.has((m as any).id)) {
-          knownIds.add((m as any).id);
-
-          // Only the last assistant message gets the cache breakpoint
-          if (
-            cache &&
-            i === finalMessages.length - 1 &&
-            m.role === "assistant"
-          ) {
-            m.providerOptions = {
-              anthropic: { cacheControl: { type: "ephemeral" } },
-            };
-          }
-
-          history.push(m as CoreMessage);
-        }
-      }
-    }
-  };
-
   const errorMessage = fs.readFileSync("src/data/error-message.txt", "utf8");
 
   // clientMessages.push({
@@ -186,20 +137,26 @@ const main = async () => {
 
       console.log("\nClaude: ");
 
-      const { textStream, usage, providerMetadata, response, steps, ...rest } =
-        await streamText({
-          model: anthropic("claude-4-sonnet-20250514"),
-          messages: clientMessages,
-          tools: {
-            executeCommand,
-          },
-          maxSteps: 5,
-        });
+      const {
+        textStream,
+        fullStream,
+        usage,
+        providerMetadata,
+        response,
+        steps,
+        ...rest
+      } = await streamText({
+        model: anthropic("claude-sonnet-4-20250514"),
+        messages: clientMessages,
+        tools: {
+          executeCommand,
+        },
+        stopWhen: stepCountIs(5),
+      });
 
       let assistantResponse = "";
-      for await (const textPart of textStream) {
-        process.stdout.write(textPart);
-        assistantResponse += textPart;
+      for await (const part of fullStream) {
+        process.stdout.write(part.type === "text-delta" ? part.text : "");
       }
 
       const { messages: finalMessages } = await response;

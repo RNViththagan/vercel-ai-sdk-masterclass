@@ -1,12 +1,13 @@
 import "dotenv/config";
 import { anthropic } from "@ai-sdk/anthropic";
-import { CoreMessage, streamText, generateText, tool } from "ai";
+import { ModelMessage, streamText, generateText, tool, stepCountIs } from "ai";
 import * as readline from "readline";
 import { z } from "zod";
 import { exec } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
+import { appendFinalMessages } from "./utils";
 
 // Global configuration
 const MAX_STEPS = 5;
@@ -24,7 +25,7 @@ interface ConversationMetadata {
 
 // Function to generate chat summary for title
 const generateChatSummary = async (
-  messages: CoreMessage[],
+  messages: ModelMessage[],
   isFirstMessage: boolean = false,
   currentTitle: string = ""
 ): Promise<string> => {
@@ -89,7 +90,7 @@ Title:`;
     const { text } = await generateText({
       model: anthropic("claude-4-sonnet-20250514"),
       prompt: promptText,
-      maxTokens: 50,
+      stopWhen: stepCountIs(10),
     });
 
     // Clean up the title - remove quotes, extra spaces, and truncate if too long
@@ -231,7 +232,7 @@ const main = async () => {
     output: process.stdout,
   });
 
-  let clientMessages: Array<CoreMessage> = [];
+  let clientMessages: Array<ModelMessage> = [];
   let conversationId: string = "";
   let isResumedConversation = false;
   let currentChatTitle = "";
@@ -296,12 +297,12 @@ const main = async () => {
   };
 
   // Function to load a conversation
-  const loadConversation = (fileName: string): CoreMessage[] => {
+  const loadConversation = (fileName: string): ModelMessage[] => {
     try {
       const content = JSON.parse(
         fs.readFileSync(path.join(logDir, fileName), "utf8")
       );
-      return content as CoreMessage[];
+      return content as ModelMessage[];
     } catch (error) {
       console.error("Error loading conversation:", error);
       return [];
@@ -377,7 +378,7 @@ const main = async () => {
   const askPermission = tool({
     description:
       "Ask the user for explicit permission before executing major/potentially risky commands. Use this for any operation that could delete files, install software, change system settings, etc.",
-    parameters: z.object({
+    inputSchema: z.object({
       action: z
         .string()
         .describe("Description of the action you want to perform"),
@@ -427,7 +428,7 @@ const main = async () => {
   const executeCommand = tool({
     description:
       "Execute terminal commands as if opening a terminal and running them directly. Use this for any command-line operations.",
-    parameters: z.object({
+    inputSchema: z.object({
       command: z.string().describe("The terminal command to execute"),
     }),
     execute: async ({ command }) => {
@@ -672,56 +673,6 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
     );
   }
 
-  const knownIds = new Set<string>();
-  const appendFinalMessages = (
-    history: Array<CoreMessage>,
-    finalMessages: Array<CoreMessage>,
-    cache: boolean
-  ) => {
-    // First, remove cache control from previous assistant messages (except system message)
-    if (cache) {
-      history.forEach((msg) => {
-        if (
-          msg.role === "assistant" &&
-          msg.providerOptions?.anthropic?.cacheControl
-        ) {
-          delete msg.providerOptions.anthropic.cacheControl;
-          // Clean up empty providerOptions
-          if (Object.keys(msg.providerOptions.anthropic).length === 0) {
-            delete msg.providerOptions.anthropic;
-          }
-          if (Object.keys(msg.providerOptions).length === 0) {
-            delete msg.providerOptions;
-          }
-        }
-      });
-    }
-
-    // Then add new messages
-    for (let i = 0; i < finalMessages.length; i++) {
-      const m = finalMessages[i];
-
-      if ((m.role === "assistant" || m.role === "tool") && (m as any).id) {
-        if (!knownIds.has((m as any).id)) {
-          knownIds.add((m as any).id);
-
-          // Only add cache control to the final assistant message
-          if (
-            cache &&
-            i === finalMessages.length - 1 &&
-            m.role === "assistant"
-          ) {
-            m.providerOptions = {
-              anthropic: { cacheControl: { type: "ephemeral" } },
-            };
-          }
-
-          history.push(m as CoreMessage);
-        }
-      }
-    }
-  };
-
   let userInput: string;
   let skipNextQuestion = false;
 
@@ -831,11 +782,11 @@ I'm here to make your computing experience smoother and more enjoyable. Whether 
           askPermission,
           executeCommand,
         },
-        maxSteps: MAX_STEPS,
+        stopWhen: stepCountIs(MAX_STEPS),
       });
 
       for await (const part of fullStream) {
-        process.stdout.write(part.type === "text-delta" ? part.textDelta : "");
+        process.stdout.write(part.type === "text-delta" ? part.text : "");
       }
 
       const { messages: finalMessages } = await response;
